@@ -5,6 +5,8 @@ TagManager:
   serializedVersion: 2
   tags:
   - Wall
+  - Fire
+  - Tree1
   layers:
   - Default
   - TransparentFX

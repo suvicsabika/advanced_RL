@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using Unity.MLAgents;
 using Unity.MLAgents.Sensors;
@@ -15,35 +13,88 @@ public class AgentScript : Agent
         BACKWARD = 3
     }
 
-    public Transform TargetTransform;
     public float speed = 10f;
+    private int stuckSteps = 0;
+    private Rigidbody rb;
+    private Vector3 lastPos;
+    private EnvironmentManager environmentManager;
 
+    // Kezdeti referencia-beállítások az agenthez és a környezethez.
+    private void Awake()
+    {
+        environmentManager = FindFirstObjectByType<EnvironmentManager>();
+        rb = GetComponent<Rigidbody>();
+
+        if (environmentManager == null)
+        {
+            Debug.LogError("AgentScript: No EnvironmentManager found in scene.");
+        }
+
+        if (rb == null)
+        {
+            Debug.LogError("AgentScript: No Rigidbody found on agent.");
+        }
+    }
+
+    // Minden epizód elején újraindítja az agentet és lenullázza a beragadás figyelést.
     public override void OnEpisodeBegin()
     {
-        // Agent reset
-        transform.localPosition = new Vector3(0, 0.0f, 0);
+        if (environmentManager != null)
+        {
+            environmentManager.ResetEnvironment(transform);
+        }
 
-        // Target random pozíció
-        TargetTransform.localPosition = new Vector3(
-            Random.Range(-85f, 85f),
-            0.0f,
-            Random.Range(-85f, 85f)
-        );
+        lastPos = transform.position;
+        stuckSteps = 0;
     }
 
+    // Fizikai frissítéskor döntést kér, és figyeli, hogy beragadt-e az agent.
+    private void FixedUpdate()
+    {
+        RequestDecision();
+
+        if (Vector3.Distance(transform.position, lastPos) < 0.05f)
+            stuckSteps++;
+        else
+            stuckSteps = 0;
+
+        lastPos = transform.position;
+
+        if (stuckSteps > 20)
+        {
+            AddReward(-0.5f);
+            EndEpisode();
+        }
+    }
+
+    // Megfigyeléseket ad át a modellnek az agent és a tűz pozíciójáról.
     public override void CollectObservations(VectorSensor sensor)
     {
-        // Agent pozíció
-        sensor.AddObservation(transform.localPosition.x);
-        sensor.AddObservation(transform.localPosition.z);
+        if (environmentManager == null || environmentManager.FireTransform == null)
+        {
+            sensor.AddObservation(0f);
+            sensor.AddObservation(0f);
+            sensor.AddObservation(0f);
+            sensor.AddObservation(0f);
+            return;
+        }
 
-        // Target pozíció
-        sensor.AddObservation(TargetTransform.localPosition.x);
-        sensor.AddObservation(TargetTransform.localPosition.z);
+        Vector3 agentPos = transform.position;
+        Vector3 firePos = environmentManager.FireTransform.position;
+
+        sensor.AddObservation(agentPos.x);
+        sensor.AddObservation(agentPos.z);
+
+        sensor.AddObservation(firePos.x);
+        sensor.AddObservation(firePos.z);
     }
 
+    // A kapott akció alapján mozgatja az agentet és jutalmazza a cél elérését.
     public override void OnActionReceived(ActionBuffers actions)
     {
+        if (environmentManager == null || environmentManager.FireTransform == null || rb == null)
+            return;
+
         int actionTaken = actions.DiscreteActions[0];
 
         switch (actionTaken)
@@ -65,29 +116,25 @@ public class AgentScript : Agent
                 break;
         }
 
-        // Mozgás előre az aktuális irányba
-        transform.Translate(Vector3.forward * speed * Time.fixedDeltaTime);
+        Vector3 move = transform.forward * speed * Time.fixedDeltaTime;
+        rb.MovePosition(rb.position + move);
 
-        // Kis büntetés minden lépésnél
         AddReward(-0.001f);
 
-        // Cél elérése
-        float distanceToTarget = Vector3.Distance(transform.localPosition, TargetTransform.localPosition);
+        float distanceToTarget = Vector3.Distance(transform.position, environmentManager.FireTransform.position);
         if (distanceToTarget < 2.0f)
         {
-            AddReward(1.0f);
+            AddReward(5.0f);
             EndEpisode();
         }
     }
 
-    private void FixedUpdate()
-    {
-        RequestDecision();
-    }
-
+    // Billentyűzetről vezérelhetővé teszi az agentet teszteléshez.
     public override void Heuristic(in ActionBuffers actionsOut)
     {
         var discreteActions = actionsOut.DiscreteActions;
+
+        discreteActions[0] = (int)ACTIONS.FORWARD;
 
         if (Input.GetKey(KeyCode.W))
             discreteActions[0] = (int)ACTIONS.FORWARD;
@@ -99,9 +146,15 @@ public class AgentScript : Agent
             discreteActions[0] = (int)ACTIONS.BACKWARD;
     }
 
+    // Ütközéskor büntetést ad falnak vagy fának való nekiütközés esetén.
     private void OnCollisionEnter(Collision collision)
     {
         if (collision.gameObject.CompareTag("Wall"))
+        {
+            AddReward(-0.1f);
+        }
+
+        if (collision.gameObject.CompareTag("Tree1"))
         {
             AddReward(-0.1f);
         }
