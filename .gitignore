@@ -19,6 +19,7 @@
 # ---------- Assests + Logs ----------
 Library/
 Logs/
+UserSettings/
 
 # ---------- Python / ML / TensorBoard ----------
 .venv/
