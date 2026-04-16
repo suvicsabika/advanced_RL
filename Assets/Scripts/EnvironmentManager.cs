@@ -7,43 +7,55 @@ public class EnvironmentManager : MonoBehaviour
     public GameObject treePrefab;
     public GameObject firePrefab;
 
-    [Header("Spawn settings")]
-    public int treeCount = 100;
-    public float spawnRadius = 80f;
-    public float minTreeDistanceFromAgent = 6f;
-    public float minFireDistanceFromAgent = 12f;
-    public float minFireDistanceFromTrees = 3f;
+    [Header("Scene references")]
+    public Terrain terrain;
+    public Transform spawnCenter;
 
-    [Header("Tags (must already exist in Unity Tags and Layers)")]
+    [Header("Spawn settings")]
+    public int treeCount = 0;
+    public float spawnRadius = 20f;
+    public float minTreeDistanceFromAgent = 3f;
+    public float minFireDistanceFromAgent = 6f;
+    public float minFireDistanceFromTrees = 1f;
+
+    [Header("Tags")]
     public string treeTag = "Tree1";
     public string fireTag = "Fire";
 
-    private Terrain terrain;
     private readonly List<GameObject> spawnedTrees = new List<GameObject>();
     private GameObject fireInstance;
 
     public Transform FireTransform => fireInstance != null ? fireInstance.transform : null;
 
-    // Induláskor betölti a fontos referenciákat és létrehozza a tűz objektumot.
+    // Induláskor beállítja a referenciákat és létrehozza a tűz objektumot.
     private void Awake()
     {
-        terrain = Terrain.activeTerrain;
+        if (terrain == null)
+        {
+            terrain = Terrain.activeTerrain;
+        }
 
         if (terrain == null)
         {
-            Debug.LogError("EnvironmentManager: No active Terrain found in scene.");
+            Debug.LogError("EnvironmentManager: No terrain assigned.");
+            return;
+        }
+
+        if (spawnCenter == null)
+        {
+            Debug.LogError("EnvironmentManager: No spawnCenter assigned.");
             return;
         }
 
         if (treePrefab == null)
         {
-            Debug.LogError("EnvironmentManager: Tree prefab is not assigned in the Inspector.");
+            Debug.LogError("EnvironmentManager: Tree prefab is not assigned.");
             return;
         }
 
         if (firePrefab == null)
         {
-            Debug.LogError("EnvironmentManager: Fire prefab is not assigned in the Inspector.");
+            Debug.LogError("EnvironmentManager: Fire prefab is not assigned.");
             return;
         }
 
@@ -51,15 +63,15 @@ public class EnvironmentManager : MonoBehaviour
         fireInstance.tag = fireTag;
     }
 
-    // Egy új epizódhoz újragenerálja az agentet, a fákat és a tüzet.
+    // Új epizódnál újrapozicionálja az agentet, a fákat és a tüzet.
     public void ResetEnvironment(Transform agentTransform)
     {
-        if (terrain == null || treePrefab == null || fireInstance == null)
+        if (terrain == null || spawnCenter == null || treePrefab == null || fireInstance == null)
             return;
 
         ClearTrees();
 
-        Vector3 agentPos = GetRandomPointNearCenter(spawnRadius);
+        Vector3 agentPos = GetRandomPointNearSpawnCenter(spawnRadius);
         agentTransform.position = agentPos;
         agentTransform.rotation = Quaternion.identity;
 
@@ -67,7 +79,7 @@ public class EnvironmentManager : MonoBehaviour
         PlaceFire(agentPos);
     }
 
-    // Véletlenszerűen lerakja a fákat a megadott területen belül.
+    // Véletlenszerűen lerakja a fákat az adott környezet középpontja körül.
     private void SpawnTrees(Vector3 agentPos)
     {
         int spawned = 0;
@@ -77,7 +89,7 @@ public class EnvironmentManager : MonoBehaviour
         while (spawned < treeCount && attempts < maxAttempts)
         {
             attempts++;
-            Vector3 pos = GetRandomPointNearCenter(spawnRadius);
+            Vector3 pos = GetRandomPointNearSpawnCenter(spawnRadius);
 
             if (Vector3.Distance(pos, agentPos) < minTreeDistanceFromAgent)
                 continue;
@@ -95,29 +107,29 @@ public class EnvironmentManager : MonoBehaviour
         }
     }
 
-    // Véletlenszerűen elhelyezi a tüzet úgy, hogy ne legyen túl közel máshoz.
+    // Véletlen helyre teszi a tüzet az adott környezeten belül.
     private void PlaceFire(Vector3 agentPos)
     {
         int attempts = 0;
-        Vector3 pos = GetRandomPointNearCenter(spawnRadius);
+        Vector3 pos = GetRandomPointNearSpawnCenter(spawnRadius);
 
-        while (attempts < 200)
-        {
-            pos = GetRandomPointNearCenter(spawnRadius);
+        // while (attempts < 200)
+        // {
+        //     pos = GetRandomPointNearSpawnCenter(spawnRadius);
 
-            bool tooCloseToAgent = Vector3.Distance(pos, agentPos) < minFireDistanceFromAgent;
-            bool tooCloseToTree = IsTooCloseToAnyTree(pos);
+        //     bool tooCloseToAgent = Vector3.Distance(pos, agentPos) < minFireDistanceFromAgent;
+        //     bool tooCloseToTree = IsTooCloseToAnyTree(pos);
 
-            if (!tooCloseToAgent && !tooCloseToTree)
-                break;
+        //     if (!tooCloseToAgent && !tooCloseToTree)
+        //         break;
 
-            attempts++;
-        }
+        //     attempts++;
+        // }
 
         fireInstance.transform.position = pos;
     }
 
-    // Ellenőrzi, hogy a megadott pont túl közel van-e valamelyik fához.
+    // Megnézi, hogy a pont túl közel van-e valamelyik fához.
     private bool IsTooCloseToAnyTree(Vector3 pos)
     {
         foreach (GameObject tree in spawnedTrees)
@@ -129,7 +141,7 @@ public class EnvironmentManager : MonoBehaviour
         return false;
     }
 
-    // Törli az előző epizódban létrehozott fákat a jelenetből.
+    // Kitörli az előző kör fáit.
     private void ClearTrees()
     {
         foreach (GameObject tree in spawnedTrees)
@@ -141,23 +153,15 @@ public class EnvironmentManager : MonoBehaviour
         spawnedTrees.Clear();
     }
 
-    // Visszaad egy véletlen pontot a terrain közepe körüli körön belül.
-    private Vector3 GetRandomPointNearCenter(float radius = 80f)
+    // Visszaad egy pontot a saját környezet közepéhez képest.
+    private Vector3 GetRandomPointNearSpawnCenter(float radius)
     {
-        TerrainData data = terrain.terrainData;
-        Vector3 terrainPos = terrain.transform.position;
-
-        Vector3 center = new Vector3(
-            terrainPos.x + data.size.x * 0.5f,
-            0f,
-            terrainPos.z + data.size.z * 0.5f
-        );
-
+        // Vector2 random2D = Random.insideUnitCircle * radius;
         Vector2 random2D = Random.insideUnitCircle * radius;
 
-        float worldX = center.x + random2D.x;
-        float worldZ = center.z + random2D.y;
-        float worldY = terrain.SampleHeight(new Vector3(worldX, 0f, worldZ)) + terrainPos.y;
+        float worldX = spawnCenter.position.x + random2D.x;
+        float worldZ = spawnCenter.position.z + random2D.y;
+        float worldY = terrain.SampleHeight(new Vector3(worldX, 0f, worldZ)) + terrain.transform.position.y;
 
         return new Vector3(worldX, worldY, worldZ);
     }
