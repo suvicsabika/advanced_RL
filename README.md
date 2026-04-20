@@ -1,4 +1,4 @@
-# advanced_RF
+# advanced_RL
 Advanced Reinforcement Learning MSc course
 
 editor_version=2022.3.5f1 
